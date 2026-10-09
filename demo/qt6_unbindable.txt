@@ -1,0 +1,50 @@
+# Members the compiler cannot bind, one signature per line, found by tools/find_unbindable.py.
+#   QFoo::bar(int, const QString &)      a method (parameter types fully qualified, as tsujikiri prints them)
+#   QFoo::<init>(int)                    a constructor
+# Everything else that cannot cross into Lua is dropped by type in tools/qt6_gen.py.
+class QRunnable::QGenericRunnable
+QAbstractItemModelTester::<init>
+QAbstractOpenGLFunctions::<init>
+QAccessibleWidget::<init>
+QAccessibleWidgetV2::<init>
+QColormap::colorAt(unsigned int)
+QColormap::colormap()
+QIcon::operator==(const QIcon &)
+QItemSelectionModel::selection()
+QKeyCombination::operator<(QKeyCombination)
+QPixmap::operator==(const QPixmap &)
+QRestAccessManager::deleteResource
+QRestAccessManager::get
+QRestAccessManager::head
+QRunnable::QGenericRunnable::run()
+QSplashScreen::pixmap()
+QTransform::asAffineMatrix()
+QJsonValue::<init>(QJsonValue::Type)   # a number would select it, and nobody means a Type
+QAccessibleAnnouncementEvent::<init>(const QAccessibleAnnouncementEvent &)
+QAccessibleApplication::<init>(const QAccessibleApplication &)
+QAccessibleStateChangeEvent::<init>(const QAccessibleStateChangeEvent &)
+QAccessibleTableModelChangeEvent::<init>(const QAccessibleTableModelChangeEvent &)
+QAccessibleTextCursorEvent::<init>(const QAccessibleTextCursorEvent &)
+QAccessibleTextInsertEvent::<init>(const QAccessibleTextInsertEvent &)
+QAccessibleTextRemoveEvent::<init>(const QAccessibleTextRemoveEvent &)
+QAccessibleTextSelectionEvent::<init>(const QAccessibleTextSelectionEvent &)
+QAccessibleTextUpdateEvent::<init>(const QAccessibleTextUpdateEvent &)
+QAccessibleValueChangeEvent::<init>(const QAccessibleValueChangeEvent &)
+QBackingStore::<init>(const QBackingStore &)
+QContiguousCacheData::<init>(const QContiguousCacheData &)
+QIODeviceBase::<init>
+QOpenGLVertexArrayObject::Binder::<init>(const QOpenGLVertexArrayObject::Binder &)
+QResource::<init>(const QResource &)
+QSignalSpy::<init>(const QSignalSpy &)
+QStandardPaths::<init>
+QStaticByteArrayMatcherBase::<init>
+QStringConverter::<init>(const QStringConverter &)
+QStringConverterBase::<init>(const QStringConverterBase &)
+QStringConverterBase::State::<init>(const QStringConverterBase::State &)
+QStringDecoder::<init>(const QStringDecoder &)
+QStringEncoder::<init>(const QStringEncoder &)
+QStringTokenizerBaseBase::<init>
+QTest::ThrowOnFailDisabler::<init>(const QTest::ThrowOnFailDisabler &)
+QTest::ThrowOnFailEnabler::<init>(const QTest::ThrowOnFailEnabler &)
+QTest::ThrowOnSkipDisabler::<init>(const QTest::ThrowOnSkipDisabler &)
+QTest::ThrowOnSkipEnabler::<init>(const QTest::ThrowOnSkipEnabler &)

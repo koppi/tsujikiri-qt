@@ -1,0 +1,2 @@
+tsujikiri==0.30.0
+aqtinstall==3.3.0

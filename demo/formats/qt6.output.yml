@@ -1,0 +1,11 @@
+# The luabridge3 format, with the Qt specifics of qt6.output.tpl: every module registers into
+# the same `qt6` Lua namespace, and the classes are marked so tools/qt6_gen.py can split them
+# over several translation units.
+format_name: qt6
+format_version: "1.0"
+description: "LuaBridge3 bindings of one Qt module"
+language: cpp
+extension: .cpp
+extends: luabridge3
+
+template_file: "qt6.output.tpl"

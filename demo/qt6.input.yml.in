@@ -1,0 +1,309 @@
+# tsujikiri input config for one module of Qt6, the LuaBridge3 bindings of Qt.
+#
+# CMake configures this template once per module into the build directory as
+# qt6_<module>.input.yml. The file name makes tsujikiri call the generated function
+# register_qt6_<module>(lua_State*); the classes themselves are registered in the shared
+# `qt6` Lua namespace (see formats/qt6.output.tpl).
+#
+# The qt6 transform stage (tools/qt6_gen.py) does the Qt specific work: it keeps only the
+# classes declared in this module's headers, drops what cannot be converted to Lua, makes
+# QObjects owned by their parent and so on. This file holds the policy, that code the mechanism.
+
+source:
+  path: "@QT6_MODULE_HEADER@"
+
+parse_args: ["-x", "c++", "-std=c++17", "-fPIC"]
+include_paths: [@QT6_INCLUDE_PATHS@]
+defines: [@QT6_DEFINES@]
+
+filters:
+  sources:
+    # Only the C++ library libclang brings along, the qt6 stage does the rest
+    exclude_patterns:
+      - "*/clang/native/*"
+
+  classes:
+    # Matched against the class name, nested classes by their own name
+    blacklist:
+      # Strings, byte arrays and variants are Lua strings and values, see support/qt6_lua.h
+      - QString
+      - QByteArray
+      - QChar
+      - QLatin1Char
+      - QLatin1StringView
+      - QStringView
+      - QUtf8StringView
+      - QAnyStringView
+      - QByteArrayView
+      - QStringList
+      - QVariant
+      - QStringTokenizer
+      - QStringTokenizerBase
+      # Iterators: Lua iterates the converted containers
+      - {pattern: "(?:const_|reverse_|const_reverse_)?iterator|(?:Const)?Iterator", is_regex: true}
+      # Containers and smart pointers are templates
+      - QPair
+      - {pattern: "Q(?:Mutable)?(?:List|LinkedList|Vector|Set|Map|MultiMap|Hash|MultiHash)(?:Iterator|SpecialMethods\\w*)?", is_regex: true}
+      - QFlags
+      - QSharedPointer
+      - QWeakPointer
+      - QScopedPointer
+      - QPointer
+      - QSharedDataPointer
+      - QExplicitlySharedDataPointer
+      - QArrayData
+      - QArrayDataPointer
+      - QTypedArrayData
+      - QStringBuilder
+      - QStaticStringData
+      - QKeyValueIterator
+      - QSpan
+      - QBasicUtf8StringView
+      # Threads cannot be shared with a Lua state
+      - QMutex
+      - QMutexLocker
+      - QRecursiveMutex
+      - QBasicMutex
+      - {pattern: "QReadWriteLock.*", is_regex: true}
+      - {pattern: "QSemaphore.*", is_regex: true}
+      - QWaitCondition
+      - {pattern: "QAtomic.*", is_regex: true}
+      - {pattern: "QBasicAtomic.*", is_regex: true}
+      - QDeadlineTimer
+      - {pattern: "QThreadStorage.*", is_regex: true}
+      - {pattern: "QFuture.*", is_regex: true}
+      - QPromise
+      - QtFuture
+      # Internals, logging and compiler helpers
+      - QDebug
+      - QNoDebug
+      - QDebugStateSaver
+      - QMessageLogger
+      - {pattern: "QTypeInfo.*", is_regex: true}
+      - {pattern: "QMetaTypeId.*", is_regex: true}
+      - QMetaTypeInterface
+      - QIntegerForSize
+      - QObjectData
+      - QObjectUserData
+      - QObjectPrivate
+      - QPrivateSignal
+      - QGenericArgument
+      - QGenericReturnArgument
+      - QMetaMethodArgument
+      - QMetaMethodReturnArgument
+      - QAbstractDeclarativeData
+      - QUntypedPropertyData
+      - QUntypedBindable
+      - QPropertyBindingData
+      - QPropertyBindingError
+      - QPropertyBindingSourceLocation
+      - {pattern: "QPropertyObserver.*", is_regex: true}
+      - QPropertyNotifier
+      - {pattern: "QProperty(?:Binding|Observer|Notifier|Data|ChangeHandler|Alias)\\w*|QProperty", is_regex: true}
+      - {pattern: "QBindable\\w*", is_regex: true}
+      - QBindingStorage
+      - {pattern: "QNotification.*", is_regex: true}
+      - QSignalBlocker
+      - QSignalMapper
+      - QDeferredDeleteEvent
+      # Platform specific
+      - {pattern: "QJni.*", is_regex: true}
+      - {pattern: "QAndroid.*", is_regex: true}
+      - {pattern: "QDarwin.*", is_regex: true}
+      - {pattern: "QNativeInterface.*", is_regex: true}
+      - QWinEventNotifier
+      - QCoreApplicationPrivate
+      # Declared in public headers, but not exported from the library: they cannot be linked
+      - QRangeModelImplBase
+      - {pattern: "QOpenGLFunctions_\\w+", is_regex: true}
+      - {pattern: "QOpenGLVersion\\w*Functions\\w*|QOpenGLVersionFunctionsStorage|QAbstractOpenGLFunctionsPrivate", is_regex: true}
+      - {pattern: "QOpenGL(?:Extra)?FunctionsPrivate", is_regex: true}
+      - QBrushDataPointerDeleter
+      # Not instantiable from Lua or without an implementation
+      - QRunnable
+      - QSharedData
+      - QEnableSharedFromThis
+      - QSequentialIterable
+      - QAssociativeIterable
+      - {pattern: "QIterable.*", is_regex: true}
+      - QMetaSequence
+      - QMetaAssociation
+      - QMetaContainer
+      - QCborStreamReader
+      - QCborStreamWriter
+
+  methods:
+    global_blacklist:
+      - pattern: "qt_.*"
+        is_regex: true
+      - d_func
+      - d_ptr
+      - data_ptr
+      - swap
+
+  fields:
+    # Public data members are read through accessors
+    global_blacklist:
+      - pattern: ".*"
+        is_regex: true
+
+  constructors:
+    include: true
+
+generation:
+  prefix: |
+    #include "qt6_lua.h"
+    #include <Qt@QT6_MODULE@/Qt@QT6_MODULE@>
+
+transforms:
+  - stage: qt6
+    source: "/Qt@QT6_MODULE@/"
+    namespaces: [@QT6_NAMESPACES@]
+    enums: [@QT6_ENUMS@]
+    functions: [@QT6_FUNCTIONS@]
+    unbindable: "@QT6_UNBINDABLE_FILE@"
+    # Qt takes these over when they are handed to it, and there is no telling whether it did
+    leaked:
+      - QStandardItem
+      - QTreeWidgetItem
+      - QTableWidgetItem
+      - QListWidgetItem
+      - QGraphicsItem
+      - QSpacerItem
+      - QWidgetItem
+      - QMimeData
+      - QUndoCommand
+      - QGraphicsEffect
+      - QStyle
+      - QAbstractTextDocumentLayout
+      - QTextObjectInterface
+      - QTextBlockUserData
+      - QSqlDriver
+
+  # Qt declares these operators as friends inside the classes; tsujikiri does not see them
+  - stage: inject_code
+    target: class
+    class: QPoint
+    code: |
+      .addFunction("__add", +[](const QPoint& a, const QPoint& b) { return a + b; })
+      .addFunction("__sub", +[](const QPoint& a, const QPoint& b) { return a - b; })
+      .addFunction("__unm", +[](const QPoint& a) { return -a; })
+      .addFunction("__mul", +[](const QPoint& a, double f) { return a * f; })
+      .addFunction("__div", +[](const QPoint& a, double f) { return a / f; })
+  - stage: inject_code
+    target: class
+    class: QPointF
+    code: |
+      .addFunction("__add", +[](const QPointF& a, const QPointF& b) { return a + b; })
+      .addFunction("__sub", +[](const QPointF& a, const QPointF& b) { return a - b; })
+      .addFunction("__unm", +[](const QPointF& a) { return -a; })
+      .addFunction("__mul", +[](const QPointF& a, double f) { return a * f; })
+      .addFunction("__div", +[](const QPointF& a, double f) { return a / f; })
+  - stage: inject_code
+    target: class
+    class: QSize
+    code: |
+      .addFunction("__add", +[](const QSize& a, const QSize& b) { return a + b; })
+      .addFunction("__sub", +[](const QSize& a, const QSize& b) { return a - b; })
+      .addFunction("__mul", +[](const QSize& a, double f) { return a * f; })
+      .addFunction("__div", +[](const QSize& a, double f) { return a / f; })
+  - stage: inject_code
+    target: class
+    class: QSizeF
+    code: |
+      .addFunction("__add", +[](const QSizeF& a, const QSizeF& b) { return a + b; })
+      .addFunction("__sub", +[](const QSizeF& a, const QSizeF& b) { return a - b; })
+      .addFunction("__mul", +[](const QSizeF& a, double f) { return a * f; })
+      .addFunction("__div", +[](const QSizeF& a, double f) { return a / f; })
+  - stage: inject_code
+    target: class
+    class: QVector2D
+    code: |
+      .addFunction("__add", +[](const QVector2D& a, const QVector2D& b) { return a + b; })
+      .addFunction("__sub", +[](const QVector2D& a, const QVector2D& b) { return a - b; })
+      .addFunction("__unm", +[](const QVector2D& a) { return -a; })
+      .addFunction("__mul", +[](const QVector2D& a, float f) { return a * f; }, +[](const QVector2D& a, const QVector2D& b) { return a * b; })
+      .addFunction("__div", +[](const QVector2D& a, float f) { return a / f; })
+  - stage: inject_code
+    target: class
+    class: QVector3D
+    code: |
+      .addFunction("__add", +[](const QVector3D& a, const QVector3D& b) { return a + b; })
+      .addFunction("__sub", +[](const QVector3D& a, const QVector3D& b) { return a - b; })
+      .addFunction("__unm", +[](const QVector3D& a) { return -a; })
+      .addFunction("__mul", +[](const QVector3D& a, float f) { return a * f; }, +[](const QVector3D& a, const QVector3D& b) { return a * b; })
+      .addFunction("__div", +[](const QVector3D& a, float f) { return a / f; })
+  - stage: inject_code
+    target: class
+    class: QVector4D
+    code: |
+      .addFunction("__add", +[](const QVector4D& a, const QVector4D& b) { return a + b; })
+      .addFunction("__sub", +[](const QVector4D& a, const QVector4D& b) { return a - b; })
+      .addFunction("__unm", +[](const QVector4D& a) { return -a; })
+      .addFunction("__mul", +[](const QVector4D& a, float f) { return a * f; }, +[](const QVector4D& a, const QVector4D& b) { return a * b; })
+      .addFunction("__div", +[](const QVector4D& a, float f) { return a / f; })
+  - stage: inject_code
+    target: class
+    class: QQuaternion
+    code: |
+      .addFunction("__mul", +[](const QQuaternion& a, const QQuaternion& b) { return a * b; }, +[](const QQuaternion& a, float f) { return a * f; })
+      .addFunction("__add", +[](const QQuaternion& a, const QQuaternion& b) { return a + b; })
+      .addFunction("__sub", +[](const QQuaternion& a, const QQuaternion& b) { return a - b; })
+  - stage: inject_code
+    target: class
+    class: QTransform
+    code: |
+      .addFunction("__mul", +[](const QTransform& a, const QTransform& b) { return a * b; })
+  - stage: inject_code
+    target: class
+    class: QMatrix4x4
+    code: |
+      .addFunction("__mul", +[](const QMatrix4x4& a, const QMatrix4x4& b) { return a * b; }, +[](const QMatrix4x4& a, const QVector4D& b) { return a * b; }, +[](const QMatrix4x4& a, float f) { return a * f; })
+      .addFunction("__add", +[](const QMatrix4x4& a, const QMatrix4x4& b) { return a + b; })
+      .addFunction("__sub", +[](const QMatrix4x4& a, const QMatrix4x4& b) { return a - b; })
+
+  # Ordering
+  - stage: inject_code
+    target: class
+    class: QDate
+    code: |
+      .addFunction("__lt", +[](const QDate& a, const QDate& b) { return a < b; })
+      .addFunction("__le", +[](const QDate& a, const QDate& b) { return a <= b; })
+  - stage: inject_code
+    target: class
+    class: QTime
+    code: |
+      .addFunction("__lt", +[](const QTime& a, const QTime& b) { return a < b; })
+      .addFunction("__le", +[](const QTime& a, const QTime& b) { return a <= b; })
+  - stage: inject_code
+    target: class
+    class: QDateTime
+    code: |
+      .addFunction("__lt", +[](const QDateTime& a, const QDateTime& b) { return a < b; })
+      .addFunction("__le", +[](const QDateTime& a, const QDateTime& b) { return a <= b; })
+  - stage: inject_code
+    target: class
+    class: QVersionNumber
+    code: |
+      .addFunction("__lt", +[](const QVersionNumber& a, const QVersionNumber& b) { return a < b; })
+      .addFunction("__le", +[](const QVersionNumber& a, const QVersionNumber& b) { return a <= b; })
+
+  # QPolygon and QPolygonF are QLists of points, and the QList template is not bound
+  - stage: inject_code
+    target: class
+    class: QPolygon
+    code: |
+      .addFunction("size", +[](const QPolygon* self) { return static_cast<int>(self->size()); })
+      .addFunction("is_empty", +[](const QPolygon* self) { return self->isEmpty(); })
+      .addFunction("append", +[](QPolygon* self, const QPoint& point) { self->append(point); })
+      .addFunction("at", +[](const QPolygon* self, int index) { return self->at(index); })
+      .addFunction("clear", +[](QPolygon* self) { self->clear(); })
+  - stage: inject_code
+    target: class
+    class: QPolygonF
+    code: |
+      .addFunction("size", +[](const QPolygonF* self) { return static_cast<int>(self->size()); })
+      .addFunction("is_empty", +[](const QPolygonF* self) { return self->isEmpty(); })
+      .addFunction("append", +[](QPolygonF* self, const QPointF& point) { self->append(point); })
+      .addFunction("at", +[](const QPolygonF* self, int index) { return self->at(index); })
+      .addFunction("clear", +[](QPolygonF* self) { self->clear(); })
