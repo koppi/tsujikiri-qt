@@ -83,8 +83,10 @@ $(GEN)/parts.mk: $(GEN_DEPS) $(QL)/symbols.txt $(PYTHON)
 # taking the machine down with it (kilobytes of address space; 0 = none).
 QTLUA_VMEM ?= 3500000
 
-# No unwind tables: nothing on this OS unwinds (exceptions are off), and they were a sixth of the code size
-NOUNWIND := -fno-asynchronous-unwind-tables -fno-unwind-tables
+# No unwind tables: nothing on this OS unwinds (exceptions are off), and they were a sixth of the code size.
+# NDEBUG: LuaBridge3's assertions are assert() otherwise, and each one carries its condition, the file and the
+# function it is in as strings (the pretty name of a class template member names its type): 40% of a unit.
+NOUNWIND := -fno-asynchronous-unwind-tables -fno-unwind-tables -DNDEBUG
 
 BIND_FLAGS := $(QT_CXXFLAGS) $(NOUNWIND) -I $(GEN)/include -I $(LUA_SRC) -I $(LUABRIDGE)/Source/ -I $(DEMO)/support -I $(GEN) -w
 
@@ -151,7 +153,7 @@ QTLUA_OBJS = $(addprefix $(QL)/gen/,$(addsuffix .o,$(PARTS) qt6_lua qt6_register
 qtlua: $(QTLUA_OBJS) $(KOPPIOS_OBJS) $(QT_LIBS_widgets) $(Q)/koppios/qt_app.lds $(KLIB)
 	@echo "  LD   qtlua"
 	@$(CXX) -m32 -nostdlib -no-pie -Wl,-T,$(Q)/koppios/qt_app.lds -Os -Wl,--gc-sections -Wl,--no-keep-memory \
-	  -o $(QL)/qtlua.unstripped $(QTLUA_OBJS) $(KOPPIOS_OBJS) \
+	  -Wl,-Map,$(QL)/qtlua.map -o $(QL)/qtlua.unstripped $(QTLUA_OBJS) $(KOPPIOS_OBJS) \
 	  -Wl,--start-group $(QT_LIBS_widgets) $(KLIB) $(LIBGCC) -Wl,--end-group
 	@strip -s -o qtlua $(QL)/qtlua.unstripped
 	@size qtlua

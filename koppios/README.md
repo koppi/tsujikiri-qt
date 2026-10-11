@@ -58,7 +58,12 @@ The pipeline is the same, tsujikiri and the `qt6` stage of `demo/tools/qt6_gen.p
 | What is bound | every class of the umbrella headers | the classes and members the vendored libraries *define* (`--symbols`, below) |
 | Enum values | one lambda and one LuaBridge3 property each | one table per enum (`compact_enums`) |
 | Lua | 5.4.8 from GitHub, `onelua.c` | 5.4.8 of `apps/lua` in koppi/os, built for the C library the Qt programs use |
+| Size | 160 MB (`qt6_demo`, unstripped, with the Qt shared libraries on top) | 11.7 MB stripped: bindings 4.75 MB, Qt 5.6 MB (the same Qt as `hqtwid`, 6.3 MB), harfbuzz, freetype and pcre2 1.1 MB, Lua 0.13 MB. The RAM disk holds all four of `qtlua`, `hqtwid`, `hqtgui` and the Doom WAD |
 | Exceptions, RTTI | on | off (no unwinder or typeinfo runtime on the OS): a Lua error unwinds with `longjmp`, so C++ objects live on the stack of a bound call are not destroyed |
+
+### What keeps it small
+
+The bindings are about 6000 registered members, a kilobyte of code each, so how they are compiled matters more than anything else: `-DNDEBUG` (LuaBridge3's `assert`s carry the condition, the file and the pretty name of a class template member as strings: 40% of a translation unit before), no unwind tables (nothing here unwinds; a sixth of the code), enum values as data tables (`compact_enums`) and the symbol filter below. Together they took `qtlua` from 14.6 to 11.7 MB without leaving a class out.
 
 ### Only what links
 
