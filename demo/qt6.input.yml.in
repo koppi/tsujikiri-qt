@@ -12,7 +12,7 @@
 source:
   path: "@QT6_MODULE_HEADER@"
 
-parse_args: ["-x", "c++", "-std=c++17", "-fPIC"]
+parse_args: [@QT6_PARSE_ARGS@]
 include_paths: [@QT6_INCLUDE_PATHS@]
 defines: [@QT6_DEFINES@]
 
@@ -161,7 +161,8 @@ transforms:
     namespaces: [@QT6_NAMESPACES@]
     enums: [@QT6_ENUMS@]
     functions: [@QT6_FUNCTIONS@]
-    unbindable: "@QT6_UNBINDABLE_FILE@"
+    unbindable: [@QT6_UNBINDABLE_FILES@]
+    compact_enums: @QT6_COMPACT_ENUMS@
     # Qt takes these over when they are handed to it, and there is no telling whether it did
     leaked:
       - QStandardItem

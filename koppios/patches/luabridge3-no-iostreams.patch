@@ -1,0 +1,25 @@
+diff --git a/Source/LuaBridge/detail/CFunctions.h b/Source/LuaBridge/detail/CFunctions.h
+index 418aea7..9f26a1f 100644
+--- a/Source/LuaBridge/detail/CFunctions.h
++++ b/Source/LuaBridge/detail/CFunctions.h
+@@ -17,6 +17,7 @@
+ #include "Userdata.h"
+ 
+ #include <algorithm>
++#include <cstdio>
+ #include <array>
+ #include <cstdint>
+ #include <memory>
+@@ -1575,9 +1576,9 @@ int tostring_metamethod(lua_State* L)
+     lua_rawgetp_x(L, -1, getTypeKey()); // Stack: mt, classname (cn)
+     lua_remove(L, -2); // Stack: cn
+ 
+-    std::stringstream ss;
+-    ss << ": 0x" << std::hex << reinterpret_cast<std::uintptr_t>(const_cast<void*>(ptr));
+-    lua_pushstring(L, ss.str().c_str()); // Stack: cn, address string (astr)
++    char address[2 * sizeof(void*) + 8];
++    std::snprintf(address, sizeof(address), ": 0x%lx", static_cast<unsigned long>(reinterpret_cast<std::uintptr_t>(const_cast<void*>(ptr))));
++    lua_pushstring(L, address); // Stack: cn, address string (astr)
+     lua_concat(L, 2); // Stack: astr
+ 
+     return 1;

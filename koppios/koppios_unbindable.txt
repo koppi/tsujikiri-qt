@@ -1,0 +1,17 @@
+# Members of the Qt that koppi/os vendors that cannot be bound there, one signature per line (the format of
+# demo/qt6_unbindable.txt, which is read as well). Everything the vendored libraries do not define is left
+# out by tools/generate.py on its own; this is for what is defined but cannot work or link:
+#   QFoo::bar(int, const QString &)      a method (parameter types fully qualified, as tsujikiri prints them)
+#   QFoo::bar                            all overloads
+#   class QFoo                           a class
+
+# Without a trash can, and without file descriptors to wrap
+QFile::moveToTrash
+QFile::open(int, QFlags<QIODeviceBase::OpenModeFlag>, QFlags<QFileDevice::FileHandleFlag>)
+
+# No drive letters
+QDir::drives
+
+# The name based UUIDs hash with QCryptographicHash::hashInto(), which the vendored Qt does not define
+QUuid::createUuidV3
+QUuid::createUuidV5

@@ -187,6 +187,9 @@ set(QT6_INCLUDE_PATHS "\"${qt6_include_dirs_joined}\"")
 set(QT6_DEFINES "\"${qt6_defines_joined}\"")
 
 set(QT6_UNBINDABLE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/qt6_unbindable.txt")
+set(QT6_UNBINDABLE_FILES "\"${QT6_UNBINDABLE_FILE}\"")
+set(QT6_COMPACT_ENUMS false)
+set(QT6_PARSE_ARGS "\"-x\", \"c++\", \"-std=c++17\", \"-fPIC\"")
 set(QT6_GEN_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/qt6_gen.py")
 set(QT6_GEN_DEPENDS
     "${QT6_GEN_SCRIPT}"

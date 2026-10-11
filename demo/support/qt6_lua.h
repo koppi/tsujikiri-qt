@@ -185,6 +185,19 @@ struct PointerStack
 /** Makes `className.name` the static function registered as `name__static`, which an instance method named `name` hides otherwise. */
 void aliasStatic(lua_State* L, const char* className, const char* name);
 
+/** One enumerator, as the generated code lists them (compact_enums in the qt6 stage). */
+struct EnumValue
+{
+    const char* name;
+    lua_Integer value;
+};
+
+/** qt6.<ns>.<enum> = { name = value, ... }, and the values themselves as qt6.<ns>.<name> (a namespace level enum such as Qt::AlignLeft); without a namespace only qt6.<enum>. */
+void addNamespaceEnum(lua_State* L, const char* ns, const char* enumName, const EnumValue* values, std::size_t count);
+
+/** qt6.<class>.<enum> = { name = value, ... }, and for an unscoped enum the values as qt6.<class>.<name> too, as in C++. */
+void addClassEnum(lua_State* L, const char* className, const char* enumName, bool unscoped, const EnumValue* values, std::size_t count);
+
 /** Registers the helpers that are not generated (connect, casts, application, variants). Call after the modules. */
 void registerSupport(lua_State* L);
 

@@ -63,11 +63,17 @@ tsujikiri_parser._type_from_tokens = _canonical_type_from_tokens  # type: ignore
 #  * it only counts the pure virtual methods a class declares itself, not the inherited ones;
 #  * it does not know `void f() const &`, which LuaBridge3 cannot bind.
 SPECIALIZATION = "qt6:specialization"
+UNLINKED = "qt6:unlinked"  # needs a symbol the library the bindings are linked against does not define
+ABSENT = "qt6:absent"  # none of the class's out-of-line members is defined: the class is not in the library
 DECLARATION = "qt6:declaration"
 LVALUE_QUALIFIED = "qt6:lvalue"  # void f() &,  void f() const &
 RVALUE_QUALIFIED = "qt6:rvalue"  # void f() &&
 _RECORD_CURSORS = (clang_cindex.CursorKind.CLASS_DECL, clang_cindex.CursorKind.STRUCT_DECL)
 _parse_class = tsujikiri_parser._parse_class
+
+# The (mangled) names of the functions the bindings can link against, one per line, or None when
+# everything is available (a build against a full Qt). Set by --symbols; see _mark_linkage().
+LINKABLE_SYMBOLS: Optional[Set[str]] = None
 
 
 def _parse_class_qt(cursor, namespace, parent_name=None):
@@ -88,6 +94,8 @@ def _parse_class_qt(cursor, namespace, parent_name=None):
         ir_class.is_abstract = True
 
     _mark_ref_qualified_methods(cursor, ir_class)
+    if LINKABLE_SYMBOLS is not None and cursor.is_definition():
+        _mark_linkage(cursor, ir_class)
     return ir_class
 
 
@@ -113,7 +121,122 @@ def _mark_ref_qualified_methods(cursor, ir_class) -> None:
             method.attributes = list(method.attributes) + [mark]
 
 
+_SOURCES: dict = {}
+_BODY = re.compile(rb"\s*(?:\{|:(?!:)|try\b|=\s*(?:default|delete)\b)")
+
+
+def _needs_no_symbol(cursor) -> bool:
+    """A body written in the class. tsujikiri skips function bodies, and the cursor of such a member is neither a
+    definition nor has a definition; what follows the declarator tells: `{`, the `:` of constructor initializers,
+    `= default`, `= delete`."""
+    end = cursor.extent.end
+    if end.file is None:
+        return False
+    data = _SOURCES.get(end.file.name)
+    if data is None:
+        data = _SOURCES[end.file.name] = Path(end.file.name).read_bytes()
+    return _BODY.match(data, end.offset) is not None
+
+
+_DEFINED_OUTSIDE: dict = {}
+
+
+def _defined_outside_class(tu) -> set:
+    """Mangled names of the members whose body is written after the class (`inline QRect QRect::united(...) { ... }`).
+
+    The declaration in the class has no definition to find while bodies are skipped (a constexpr body is the one
+    kind that is not skipped), but the definition is a cursor of its own in the translation unit."""
+    key = tu.spelling
+    if key in _DEFINED_OUTSIDE:
+        return _DEFINED_OUTSIDE[key]
+
+    kinds = clang_cindex.CursorKind
+    names: set = set()
+
+    def visit(parent) -> None:
+        for child in parent.get_children():
+            if child.kind in (kinds.NAMESPACE, kinds.LINKAGE_SPEC):
+                visit(child)
+            elif child.kind in (kinds.CXX_METHOD, kinds.CONSTRUCTOR, kinds.DESTRUCTOR):
+                lexical = child.lexical_parent
+                if lexical is not None and lexical.kind not in (kinds.CLASS_DECL, kinds.STRUCT_DECL) and _needs_no_symbol(child):
+                    names.add(child.mangled_name)
+
+    visit(tu.cursor)
+    _DEFINED_OUTSIDE[key] = names
+    return names
+
+
+def _is_linkable(cursor) -> Optional[bool]:
+    """Whether calling `cursor` links: None if it needs no symbol at all (defined in the header, pure virtual, deleted)."""
+    if cursor.is_pure_virtual_method():
+        return None
+    if cursor.get_definition() is not None or _needs_no_symbol(cursor):
+        return None
+    name = cursor.mangled_name
+    if not name or name in _defined_outside_class(cursor.translation_unit):
+        return None
+    assert LINKABLE_SYMBOLS is not None
+    if name in LINKABLE_SYMBOLS:
+        return True
+    # The compiler emits the complete (C1/D1) and base (C2/D2) constructor and destructor as aliases of one body
+    for complete, base in (("C1", "C2"), ("D1", "D2")):
+        if complete in name:
+            return name.replace(complete, base) in LINKABLE_SYMBOLS
+    return False
+
+
+def _mark_linkage(cursor, ir_class) -> None:
+    """Marks what a build against a *partial* Qt cannot call.
+
+    The bindings take the address of (or call) every member they register, so each member that is
+    declared in a header and defined in a source file has to be in the library the bindings are
+    linked against. `LINKABLE_SYMBOLS` lists what that library defines. A member that is not there is
+    marked UNLINKED, and a class none of whose out-of-line members is there (so it was not compiled
+    into the library at all) is marked ABSENT.
+    """
+    kinds = clang_cindex.CursorKind
+    access = clang_cindex.AccessSpecifier
+    outside = defined = 0
+    unlinked_methods = {}
+    unlinked_ctors = set()
+
+    for child in cursor.get_children():
+        if child.kind not in (kinds.CXX_METHOD, kinds.CONSTRUCTOR, kinds.DESTRUCTOR) or child.access_specifier == access.PRIVATE:
+            continue
+        linkable = _is_linkable(child)
+        if linkable is None:
+            continue
+        outside += 1
+        if linkable:
+            defined += 1
+            continue
+        types = tuple(tsujikiri_parser._normalize_type_spelling(a.type.spelling) for a in child.get_arguments())
+        if child.kind == kinds.CXX_METHOD and not child.is_virtual_method():
+            unlinked_methods[(child.spelling, types, child.is_const_method())] = True
+        elif child.kind == kinds.CONSTRUCTOR:
+            unlinked_ctors.add(types)
+        elif child.kind == kinds.DESTRUCTOR:
+            # A class that cannot be destroyed cannot be held by a Lua value
+            outside, defined = 1, 0
+            break
+
+    if outside and not defined:
+        ir_class.attributes = list(ir_class.attributes) + [ABSENT]
+        return
+
+    for method in ir_class.methods:
+        if (method.name, tuple(p.type_spelling for p in method.parameters), method.is_const) in unlinked_methods:
+            method.attributes = list(method.attributes) + [UNLINKED]
+    for ctor in ir_class.constructors:
+        if tuple(p.type_spelling for p in ctor.parameters) in unlinked_ctors:
+            ctor.attributes = list(ctor.attributes) + [UNLINKED]
+
+
 tsujikiri_parser._parse_class = _parse_class_qt  # type: ignore[assignment]
+
+# The classes that are not in the library (ABSENT), as one pattern; filled in by the qt6 stage
+ABSENT_TYPES: Optional[re.Pattern] = None
 
 # ----------------------------------------------------------------------------------------
 # Which C++ types the support layer (support/qt6_lua.h) and LuaBridge3 can convert
@@ -141,7 +264,7 @@ _UNSUPPORTED_WORDS = re.compile(
   | \bQSharedData\b | \bQSharedDataPointer\b | \bQExplicitlySharedDataPointer\b
   | \bQSharedPointer\b | \bQWeakPointer\b | \bQScopedPointer\b | \bQPointer\b
   | \bQFuture\w* | \bQPromise\b | \bQtFuture\b
-  | \bQChar\s*\* | \bchar8_t\b
+  | \bQChar\s*\* | \bchar8_t\b | \b_IO_FILE\b | \bFILE\b
   | \bQMutex\w* | \bQReadWriteLock\b | \bQWaitCondition\b | \bQSemaphore\w* | \bQAtomic\w*
   | \bQBasicAtomic\w* | \bQBasicMutex\b
   | \bstd::(?!string\b|pair\b|optional\b|vector\b|map\b|string_view\b)
@@ -189,6 +312,8 @@ _LUA_KEYWORDS = {
 def is_unsupported_type(spelling: str, *, is_parameter: bool = False) -> bool:
     """True when `spelling` cannot be passed to or returned to Lua."""
     t = " ".join(spelling.split())
+    if ABSENT_TYPES is not None and ABSENT_TYPES.search(t):
+        return True
     # rvalue references, function types/pointers, arrays, unnamed types, parameter packs
     if "&&" in t or "(" in t or "[" in t or "..." in t:
         return True
@@ -269,7 +394,8 @@ class QtBindingsStage(TransformStage):
       functions: ["QTest::.*"]    # namespace level functions (regex on the qualified name)
       holder: "qt6::QtOwned"      # container for QObject derived classes
       leaked: ["QStandardItem"]   # classes (and what derives from them) Qt takes over, Lua never deletes them
-      unbindable: path/to/list    # signatures the compiler rejected (tools/find_unbindable.py)
+      unbindable: path/to/list    # signatures the compiler rejected (tools/find_unbindable.py), or a list of such files
+      compact_enums: false        # register enum values from tables (qt6::addClassEnum), not one lambda per value
     """
 
     name = "qt6"
@@ -283,7 +409,11 @@ class QtBindingsStage(TransformStage):
         self.leaked_holder: str = kwargs.get("leaked_holder", "qt6::QtLeaked")
         self.enum_names: Set[str] = set()
         self.leaked: Set[str] = set(kwargs.get("leaked", []))
-        entries = load_signature_list(kwargs.get("unbindable"))
+        self.compact_enums: bool = bool(kwargs.get("compact_enums", False))
+        entries: Set[str] = set()
+        listed = kwargs.get("unbindable") or []
+        for path in [listed] if isinstance(listed, str) else listed:
+            entries |= load_signature_list(path)
         self.unbindable_classes = {e[len("class "):] for e in entries if e.startswith("class ")}
         self.unbindable = {e for e in entries if not e.startswith("class ")}
 
@@ -295,6 +425,7 @@ class QtBindingsStage(TransformStage):
 
         # What the normal filters (class blacklist, system header exclusion) already dropped
         # belongs to nobody. Everything dropped from here on may still be bound by another module.
+        self._absent(by_name)
         blacklisted = {q for q, c in by_name.items() if not c.emit}
 
         for qualified in self.unbindable_classes:
@@ -317,6 +448,53 @@ class QtBindingsStage(TransformStage):
             if cls.emit:
                 self._members(cls)
         self._policy(module, by_name, blacklisted)
+        if self.compact_enums:
+            self._compact_enums(module)
+
+    @staticmethod
+    def _absent(by_name: dict) -> None:
+        """Classes the library does not contain are no bindings, and no type of a member either (--symbols)."""
+        global ABSENT_TYPES
+        absent = sorted((q for q, c in by_name.items() if ABSENT in c.attributes), key=len, reverse=True)
+        ABSENT_TYPES = None
+        if not absent:
+            return
+        for qualified in absent:
+            by_name[qualified].emit = False
+        # `QUrl` is a class, `QUrl::ParsingMode` an enumeration declared in it: that needs no symbol
+        names = "|".join(re.escape(q) for q in absent)
+        ABSENT_TYPES = re.compile(rf"(?<![\w:])(?:{names})(?![\w])(?!\s*::)")
+
+    def _compact_enums(self, module: TIRModule) -> None:
+        """Enum values are data: one table per enum and one call that registers it, instead of a lambda
+        and a LuaBridge3 property for every value (the values of Qt's enums are most of what is registered:
+        QLocale alone has 900 of them). The template skips an enum that is not emitted.
+
+        The values are the ones libclang computed, so the registration is code that cannot fail to compile.
+        """
+
+        def table(enum) -> str:
+            values = ", ".join(f'{{"{v.binding_name}", {v.value}LL}}' for v in enum.values if v.emit)
+            return f"static const qt6::EnumValue values[] = {{{values}}}; "
+
+        for enum in module.enums:
+            if not enum.emit or not any(v.emit for v in enum.values):
+                continue
+            namespace = "_".join(enum.qualified_name.split("::")[:-1])
+            call = f'qt6::addNamespaceEnum(L, "{namespace}", "{enum.binding_name}", values, {sum(1 for v in enum.values if v.emit)});'
+            module.code_injections.append(IRCodeInjection(position="end", code=f"{{ {table(enum)}{call} }}"))
+            enum.emit = False
+
+        for cls in walk_classes(module.classes):  # type: ignore[arg-type]
+            if not cls.emit:
+                continue
+            for enum in cls.enums:
+                if not enum.emit or not any(v.emit for v in enum.values):
+                    continue
+                unscoped = "false" if enum.is_scoped else "true"
+                call = f'qt6::addClassEnum(L, "{cls.rename or cls.name}", "{enum.binding_name}", {unscoped}, values, {sum(1 for v in enum.values if v.emit)});'
+                module.code_injections.append(IRCodeInjection(position="end", code=f"{{ {table(enum)}{call} }}"))
+                enum.emit = False
 
     def _in_scope(self, cls: TIRClass) -> bool:
         return bool(self.source.search((cls.source_file or "").replace("\\", "/"))) and (
@@ -413,6 +591,7 @@ class QtBindingsStage(TransformStage):
 
             if (
                 RVALUE_QUALIFIED in method.attributes
+                or UNLINKED in method.attributes
                 or method.is_deprecated
                 or method.is_varargs
                 or method.is_conversion_operator
@@ -444,7 +623,7 @@ class QtBindingsStage(TransformStage):
             if not ctor.emit:
                 continue
             usable = self._usable_parameters(ctor.parameters)
-            if ctor.is_deleted or ctor.is_deprecated or ctor.is_varargs or usable is None:
+            if ctor.is_deleted or ctor.is_deprecated or ctor.is_varargs or usable is None or UNLINKED in ctor.attributes:
                 ctor.emit = False
                 continue
 
@@ -696,7 +875,12 @@ def main() -> None:
     parser.add_argument("--formats-dir", help="directory with the qt6 output format")
     parser.add_argument("--classes-file", help="write the qualified names of the bound classes here")
     parser.add_argument("--jobs", default="1")
+    parser.add_argument("--symbols", help="file with the mangled names of the functions the bindings can link against (a partial Qt)")
     args = parser.parse_args()
+
+    if args.symbols:
+        global LINKABLE_SYMBOLS
+        LINKABLE_SYMBOLS = {line.strip() for line in Path(args.symbols).read_text(encoding="utf-8").splitlines() if line.strip()}
 
     input_path = Path(args.input)
     module = input_path.stem.replace(".input", "")

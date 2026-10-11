@@ -493,6 +493,109 @@ void aliasStatic(lua_State* L, const char* className, const char* name)
 
 namespace {
 
+/** Pushes the table `name` of the `qt6` namespace (the static table of a class, or a namespace made if there is none). */
+bool pushEntry(lua_State* L, const char* name, bool create)
+{
+    lua_getglobal(L, "qt6");
+    if (!lua_istable(L, -1))
+    {
+        lua_pop(L, 1);
+        return false;
+    }
+
+    lua_pushstring(L, name);
+    lua_rawget(L, -2);
+    if (!lua_istable(L, -1) && create)
+    {
+        lua_pop(L, 1);
+        luabridge::getGlobalNamespace(L).beginNamespace("qt6").beginNamespace(name).endNamespace().endNamespace();
+        lua_pushstring(L, name);
+        lua_rawget(L, -2);
+    }
+
+    lua_remove(L, -2); // qt6
+    if (lua_istable(L, -1))
+        return true;
+
+    lua_pop(L, 1);
+    return false;
+}
+
+/** table[name] = value, unless the table has an entry of that name (a static function of the class wins over an enumerator). */
+void setNew(lua_State* L, int table, const char* name, lua_Integer value)
+{
+    table = lua_absindex(L, table);
+    lua_pushstring(L, name);
+    lua_rawget(L, table);
+    const bool taken = !lua_isnil(L, -1);
+    lua_pop(L, 1);
+    if (taken)
+        return;
+
+    lua_pushstring(L, name);
+    lua_pushinteger(L, value);
+    lua_rawset(L, table);
+}
+
+void addEnum(lua_State* L, const char* owner, bool createOwner, const char* enumName, bool flatten, const EnumValue* values, std::size_t count)
+{
+    const int top = lua_gettop(L);
+    if (!pushEntry(L, owner, createOwner))
+        return;
+
+    const int ownerTable = lua_gettop(L);
+    lua_createtable(L, 0, static_cast<int>(count));
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        lua_pushinteger(L, values[i].value);
+        lua_setfield(L, -2, values[i].name);
+        if (flatten)
+            setNew(L, ownerTable, values[i].name, values[i].value);
+    }
+
+    lua_pushstring(L, enumName);
+    lua_insert(L, -2);
+    lua_rawset(L, ownerTable);
+    lua_settop(L, top);
+}
+
+} // namespace
+
+void addNamespaceEnum(lua_State* L, const char* ns, const char* enumName, const EnumValue* values, std::size_t count)
+{
+    if (*ns)
+    {
+        addEnum(L, ns, true, enumName, true, values, count);
+        return;
+    }
+
+    // An enum outside of any namespace (QtMsgType) is a table of qt6: qt6.QtMsgType.QtDebugMsg
+    const int top = lua_gettop(L);
+    lua_getglobal(L, "qt6");
+    if (lua_istable(L, -1))
+    {
+        lua_createtable(L, 0, static_cast<int>(count));
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            lua_pushinteger(L, values[i].value);
+            lua_setfield(L, -2, values[i].name);
+        }
+
+        lua_pushstring(L, enumName);
+        lua_insert(L, -2);
+        lua_rawset(L, -3); // raw: LuaBridge3's namespace and class tables refuse assignments (__newindex)
+    }
+
+    lua_settop(L, top);
+}
+
+void addClassEnum(lua_State* L, const char* className, const char* enumName, bool unscoped, const EnumValue* values, std::size_t count)
+{
+    addEnum(L, className, false, enumName, unscoped, values, count);
+}
+
+namespace {
+
 // ------------------------------------------------------------------------------------------
 // Signals
 // ------------------------------------------------------------------------------------------
@@ -784,7 +887,7 @@ Application* createApplication(lua_State* L, const LuaRef& arguments)
 {
     if (QCoreApplication* existing = QCoreApplication::instance())
     {
-        if (auto* matching = dynamic_cast<Application*>(existing))
+        if (auto* matching = qobject_cast<Application*>(existing))
             return matching;
 
         luaL_error(L, "there already is a %s, it cannot be turned into another kind of application", existing->metaObject()->className());
