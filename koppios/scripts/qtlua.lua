@@ -83,7 +83,7 @@ greet:connect("clicked", function()
     greetings = greetings + 1
     local who = name:text() ~= "" and name:text() or "stranger"
     greeting:set_text(string.format("Hello, %s! (%d, age %d, %s)", who, greetings, age:value(), fruit:current_text()))
-    say("greeted " .. greetings)
+    say("greeted " .. greetings .. " " .. greeting:text())
 end)
 
 name:connect("textChanged(QString)", function(text) say("name " .. text) end)
@@ -99,7 +99,9 @@ slider:connect("valueChanged(int)", function(value)
 end)
 dial:connect("valueChanged(int)", function(value)
     slider:set_value(value)
+    say("dial " .. value)
 end)
+bar:connect("valueChanged(int)", function(value) say("progress " .. value) end)
 
 -- Which widget has the keyboard
 qt.QApplication.instance():connect("focusChanged(QWidget*,QWidget*)", function(_, now)
